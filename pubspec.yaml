@@ -1,0 +1,22 @@
+name: fretboard_spectrum
+description: Fretboard Spectrum — guitar fretboard trainer phone app (Flutter port of the QB64 program).
+publish_to: 'none'
+version: 0.2.0
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  audioplayers: ^6.8.1
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.5.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  test: ^1.24.0
+
+flutter:
+  uses-material-design: true
