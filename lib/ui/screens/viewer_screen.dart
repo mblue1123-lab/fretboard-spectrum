@@ -3,9 +3,9 @@
 // Ports the rainbow-reference mode of the QB64 program (SUB
 // rainbowgraphics / rainbowgraphics2 drew the whole fretboard with every
 // position colored by octave; SUB drawkeyboard showed the piano mirror).
-// This is an explorable reference, not a quiz: pick an octave, see every
-// one of its notes light up in the octave's rainbow color, tap any of
-// them — or the piano keys — to hear its pitch.
+// This is an explorable reference, not a quiz: pick an octave — or All —
+// see every one of its notes light up in the octave's rainbow color, tap
+// any of them — or the piano keys — to hear its pitch.
 
 import 'package:flutter/material.dart';
 
@@ -32,6 +32,7 @@ class ViewerScreen extends StatefulWidget {
 class _ViewerScreenState extends State<ViewerScreen> {
   late final NotePlayer _player;
   int _octave = 2;
+  bool _showAll = false;
   late bool _sharps;
 
   @override
@@ -47,8 +48,12 @@ class _ViewerScreenState extends State<ViewerScreen> {
     super.dispose();
   }
 
-  List<int> get _ids =>
-      idsInOctave(_octave, sevenString: widget.sevenString);
+  List<int> get _ids => _showAll
+      ? [
+          for (var o = -1; o <= 4; o++)
+            ...idsInOctave(o, sevenString: widget.sevenString),
+        ]
+      : idsInOctave(_octave, sevenString: widget.sevenString);
 
   @override
   Widget build(BuildContext context) {
@@ -70,7 +75,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
       body: Column(
         children: [
           const SizedBox(height: 12),
-          // Octave selector: the rainbow itself.
+          // Octave selector: the rainbow itself, plus All.
           Wrap(
             alignment: WrapAlignment.center,
             spacing: 8,
@@ -78,17 +83,32 @@ class _ViewerScreenState extends State<ViewerScreen> {
               for (var o = -1; o <= 4; o++)
                 _OctaveChip(
                   octave: o,
-                  selected: o == _octave,
-                  onTap: () => setState(() => _octave = o),
+                  selected: o == _octave && !_showAll,
+                  onTap: () {
+                    setState(() {
+                      _octave = o;
+                      _showAll = false;
+                    });
+                  },
                 ),
+              _AllChip(
+                selected: _showAll,
+                onTap: () => setState(() => _showAll = true),
+              ),
             ],
           ),
           const SizedBox(height: 8),
-          Text(
-            'Octave $_octave · ${octaveRegisterName(_octave)}'
-            '${ids.isEmpty ? ' · no notes on a 6-string' : ' · ${ids.length} notes'}',
-            style: TextStyle(fontSize: 16, color: octaveColor),
-          ),
+          if (_showAll)
+            Text(
+              'All octaves · ${ids.length} notes',
+              style: const TextStyle(fontSize: 16),
+            )
+          else
+            Text(
+              'Octave $_octave · ${octaveRegisterName(_octave)}'
+              '${ids.isEmpty ? ' · no notes on a 6-string' : ' · ${ids.length} notes'}',
+              style: TextStyle(fontSize: 16, color: octaveColor),
+            ),
           const SizedBox(height: 8),
           Expanded(
             child: SingleChildScrollView(
@@ -102,18 +122,29 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     onNoteTapped: (id) => _player.playNoteId(id),
                   ),
                   const SizedBox(height: 12),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      'Tap any glowing note — or a piano key — to hear it.',
-                      style: TextStyle(color: Colors.grey),
+                  if (_showAll)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        'Every octave at once, each in its own rainbow color. Tap any glowing note to hear it.',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    )
+                  else ...[
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        'Tap any glowing note — or a piano key — to hear it.',
+                        style: TextStyle(color: Colors.grey),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: _pianoStrip(),
-                  ),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 16),
+                      child: _pianoStrip(),
+                    ),
+                  ],
                   const SizedBox(height: 24),
                 ],
               ),
@@ -196,6 +227,49 @@ class _ViewerScreenState extends State<ViewerScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+/// "All" chip for the Spectrum Viewer: a rainbow-gradient pill that
+/// selects every octave at once.
+class _AllChip extends StatelessWidget {
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _AllChip({
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? Colors.white : Colors.transparent,
+            width: 3,
+          ),
+          gradient: LinearGradient(
+            colors: [
+              for (var o = -1; o <= 4; o++) Color(colorOfOctave(o)),
+            ],
+          ),
+        ),
+        child: const Text(
+          'All',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.black,
+          ),
+        ),
+      ),
     );
   }
 }

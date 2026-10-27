@@ -3,9 +3,10 @@
 // Merges SUB questionscreen and SUB answerscreen from Fretspc9_LARGE.BAS
 // into one screen with two modes:
 //
-//  Real Guitar Mode: the note name (+ octave color chip) and pitch are
-//    given; the player taps the position on the fretboard. Any tapped
-//    position with the same pitch class as the target scores +1.
+//  Real Guitar Mode: the engine picks a note; its fretboard position is
+//    highlighted in the octave's rainbow color and its pitch is played.
+//    The player NAMES the note with letter buttons (A-G) plus a
+//    sharp/flat/natural toggle. Correct letter -> +1.
 //  Air Guitar Mode: audio only; the player picks the letter name with
 //    buttons and the octave with the rainbow octave picker. Each half is
 //    worth 0.5, exactly the partial-credit matrix in SUB answerscreen.
@@ -63,7 +64,11 @@ String _toSharp(String name) {
 class QuizScreen extends StatefulWidget {
   final QuizConfig config;
 
-  const QuizScreen({super.key, required this.config});
+  /// Optional engine override — tests pass a seeded engine so the picked
+  /// note is deterministic.
+  final QuizEngine? engine;
+
+  const QuizScreen({super.key, required this.config, this.engine});
 
   @override
   State<QuizScreen> createState() => _QuizScreenState();
@@ -76,14 +81,14 @@ class _QuizScreenState extends State<QuizScreen> {
 
   int? _targetId;
 
-  // Real-guitar answer state.
-  int? _tappedId;
-  bool? _tapCorrect;
+  // Real-guitar answer state: the player names the highlighted note with
+  // letter buttons plus a sharp/flat/natural toggle.
+  String? _pickedLetter;
+  String _pickedAccidental = '';
+  bool? _letterCorrect;
 
   // Air-guitar answer state.
-  String? _pickedLetter;
   int? _pickedOctave;
-  bool? _letterCorrect;
   bool? _octaveCorrect;
 
   double _lastEarned = 0;
@@ -100,8 +105,7 @@ class _QuizScreenState extends State<QuizScreen> {
   final GlobalKey _scrollKey = GlobalKey();
 
   QuizConfig get _c => widget.config;
-  bool get _answered =>
-      _c.mode == QuizMode.realGuitar ? _tapCorrect != null : _letterCorrect != null;
+  bool get _answered => _letterCorrect != null;
 
   String get _targetLetter => letterOf(_targetId!, sharps: _c.sharps);
   int get _targetOctave => octaveOf(_targetId!);
@@ -110,7 +114,7 @@ class _QuizScreenState extends State<QuizScreen> {
   @override
   void initState() {
     super.initState();
-    _engine = QuizEngine();
+    _engine = widget.engine ?? QuizEngine();
     _session = Session(_c.reps);
     _player = NotePlayer();
     _nextQuestion();
@@ -131,14 +135,15 @@ class _QuizScreenState extends State<QuizScreen> {
     );
     setState(() {
       _targetId = id;
-      _tappedId = null;
-      _tapCorrect = null;
       _pickedLetter = null;
+      _pickedAccidental = '';
       _pickedOctave = null;
       _letterCorrect = null;
       _octaveCorrect = null;
     });
     _player.playNoteId(id);
+    // The highlight IS the question now: bring it into view.
+    _scrollToTarget();
   }
 
   void _replay() {
@@ -146,14 +151,16 @@ class _QuizScreenState extends State<QuizScreen> {
     if (id != null) _player.playNoteId(id);
   }
 
-  // -- Real guitar: tap the fretboard -----------------------------------
+  // -- Real guitar: name the highlighted note ----------------------------
 
-  void _answerTap(int tappedId) {
-    if (_targetId == null || _tapCorrect != null) return;
-    // Any position with the target's pitch class counts: the same note
-    // lives in several places on the neck, and all of them are musically
-    // correct answers to "tap the Db".
-    final correct = playNameOf(tappedId) == _targetPitchClass;
+  void _answerReal() {
+    if (_targetId == null || _answered) return;
+    final letter = _pickedLetter;
+    if (letter == null) return;
+    // Letter + accidental against the target's canonical pitch class
+    // (sharp-spelled, like the BASIC name$).
+    final answer = '$letter$_pickedAccidental';
+    final correct = _toSharp(answer) == _targetPitchClass;
     final earned = scoreRealGuitar(letterCorrect: correct);
     _session.recordAnswer(earned);
     if (!correct) {
@@ -161,8 +168,7 @@ class _QuizScreenState extends State<QuizScreen> {
       if (_footprintsOn) _footprints.add(_targetId!);
     }
     setState(() {
-      _tappedId = tappedId;
-      _tapCorrect = correct;
+      _letterCorrect = correct;
       _lastEarned = earned;
     });
     if (correct) {
@@ -170,7 +176,6 @@ class _QuizScreenState extends State<QuizScreen> {
     } else {
       _player.playWrong();
     }
-    _scrollToTarget();
   }
 
   void _scrollToTarget() {
@@ -301,7 +306,6 @@ class _QuizScreenState extends State<QuizScreen> {
   }
 
   Widget _buildRealGuitar() {
-    final octaveColor = Color(colorOfOctave(_targetOctave));
     return Expanded(
       child: Column(
         children: [
@@ -310,15 +314,8 @@ class _QuizScreenState extends State<QuizScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Text('Tap the ', style: TextStyle(fontSize: 20)),
-                Text(
-                  _targetLetter,
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: octaveColor,
-                  ),
-                ),
+                const Text('Name the highlighted note',
+                    style: TextStyle(fontSize: 20)),
                 const SizedBox(width: 12),
                 _OctaveChip(octave: _targetOctave),
               ],
@@ -332,28 +329,86 @@ class _QuizScreenState extends State<QuizScreen> {
                 key: _boardKey,
                 sevenString: _c.sevenString,
                 leftHanded: _c.leftHanded,
-                // The target is highlighted only in feedback, never while
-                // answering: otherwise tapping it would be trivial.
-                highlightedId: _answered ? _targetId : null,
+                // The highlight IS the question: always visible, in the
+                // target's octave color. No tap handler — the player
+                // answers with the letter buttons below.
+                highlightedId: _targetId,
                 footprintIds: _footprints,
                 showFootprints: _footprintsOn,
-                onNoteTapped: _answerTap,
               ),
             ),
           ),
+          _buildRealAnswerPanel(),
           _FeedbackBar(
             answered: _answered,
             earned: _lastEarned,
             message: _answered
-                ? (_tapCorrect!
+                ? (_letterCorrect!
                     ? 'Correct! $_targetLetter'
                     : 'Not quite — $_targetLetter, '
                         'string ${stringOf(_targetId!)}, '
                         'fret ${fretOf(_targetId!)} '
-                        '(you tapped ${playNameOf(_tappedId!)})')
+                        '(you answered ${_pickedLetter ?? '?'}'
+                        '$_pickedAccidental)')
                 : null,
             onNext: _nextQuestion,
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Letter buttons (A-G) plus a sharp/flat/natural toggle for Real
+  /// Guitar Mode. The accidental toggle only appears when the session
+  /// includes accidentals.
+  Widget _buildRealAnswerPanel() {
+    const naturals = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+    final showAccidentals =
+        _c.accidentalFilter != AccidentalFilter.naturalsOnly;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      color: Colors.grey[900],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final n in naturals)
+                _ChoiceChip(
+                  label: n,
+                  selected: _pickedLetter == n,
+                  enabled: !_answered,
+                  onTap: () => setState(() => _pickedLetter = n),
+                ),
+            ],
+          ),
+          if (showAccidentals) ...[
+            const SizedBox(height: 8),
+            SegmentedButton<String>(
+              style: SegmentedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+              ),
+              segments: const [
+                ButtonSegment(value: '', label: Text('♮ Natural')),
+                ButtonSegment(value: '#', label: Text('♯ Sharp')),
+                ButtonSegment(value: 'b', label: Text('♭ Flat')),
+              ],
+              selected: {_pickedAccidental},
+              onSelectionChanged: _answered
+                  ? null
+                  : (s) => setState(() => _pickedAccidental = s.first),
+            ),
+          ],
+          const SizedBox(height: 8),
+          if (!_answered)
+            ElevatedButton(
+              onPressed:
+                  _pickedLetter != null ? _answerReal : null,
+              child: const Text('Check answer'),
+            ),
         ],
       ),
     );
@@ -610,7 +665,7 @@ class _FeedbackBar extends StatelessWidget {
       return const SizedBox(
         height: 72,
         child: Center(
-          child: Text('Tap a position on the fretboard',
+          child: Text('Name the highlighted note',
               style: TextStyle(color: Colors.grey)),
         ),
       );
